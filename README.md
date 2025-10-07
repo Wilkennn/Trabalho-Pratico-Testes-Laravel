@@ -205,7 +205,6 @@ class AuthenticationTest extends TestCase
      */
     public function test_login_com_credenciais_validas(): void
     {
-        // 1. Preparação: Cria um usuário no banco
         $user = User::factory()->create([
             'password' => bcrypt($password = 'senha-super-segura')
         ]);

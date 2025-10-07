@@ -2,6 +2,7 @@
 
 namespace Tests\Unit;
 
+use App\Models\Product;
 use App\Services\DiscountService;
 use PHPUnit\Framework\TestCase;
 
@@ -9,6 +10,10 @@ class DiscountServiceTest extends TestCase
 {
     private DiscountService $service;
 
+    /**
+     * Prepara o ambiente para cada teste.
+     * Este método é chamado automaticamente pelo PHPUnit antes de cada teste.
+     */
     protected function setUp(): void
     {
         parent::setUp();
@@ -17,99 +22,124 @@ class DiscountServiceTest extends TestCase
 
     /**
      * @test
-     * @description Teste para o método calculateTieredDiscount.
-     * @technique Análise do Valor Limite
-     * Este teste verifica os limites exatos onde a lógica de desconto muda.
-     * Testamos o valor 499.99 (que deve ter 5% de desconto) e 500.00 (que deve ter 10%).
+     * @description Testa a aplicação de descontos por faixa de preço.
+     * @technique Análise de Valor Limite
+     * Verifica se o desconto é aplicado corretamente nos valores que definem
+     * a mudança de faixa (as fronteiras), como R$99.99, R$100.00, R$499.99 e R$500.00.
      */
-    public function it_applies_correct_discount_at_the_500_boundary()
+    public function it_applies_correct_discount_at_all_boundaries(): void
     {
-        // Testando o limite superior da faixa de 5%
-        $this->assertEquals(24.9995, $this->service->calculateTieredDiscount(499.99), "Falhou no limite inferior de R$500");
+        // --- Teste da fronteira de R$100 ---
+        // Imediatamente abaixo do limite (deve ter 0% de desconto)
+        $this->assertEquals(0.0, $this->service->calculateTieredDiscount(99.99), "Falhou abaixo do limite de R$100");
+        // No limite exato (deve ter 5% de desconto)
+        $this->assertEquals(5.0, $this->service->calculateTieredDiscount(100.00), "Falhou no limite exato de R$100");
 
-        // Testando o limite exato da faixa de 10%
-        $this->assertEquals(50, $this->service->calculateTieredDiscount(500.00), "Falhou no limite exato de R$500");
+        // --- Teste da fronteira de R$500 ---
+        // Imediatamente abaixo do limite (deve ter 5% de desconto)
+        $this->assertEquals(24.9995, $this->service->calculateTieredDiscount(499.99), "Falhou abaixo do limite de R$500");
+        // No limite exato (deve ter 10% de desconto)
+        $this->assertEquals(50.0, $this->service->calculateTieredDiscount(500.00), "Falhou no limite exato de R$500");
     }
 
     /**
      * @test
-     * @description Teste para o método calculateLoyaltyDiscountRate.
+     * @description Testa o desconto de lealdade baseado em múltiplas condições.
      * @technique Grafo de Causa e Efeito
-     * Este teste cobre um caminho específico do grafo: quando ambas as causas
-     * ('é membro' e 'é primeira compra') são verdadeiras, o efeito esperado é um desconto de 15%.
+     * Valida todas as combinações lógicas entre as "causas" (ser membro, ser primeira compra)
+     * para garantir que o "efeito" (a taxa de desconto) está correto em cada cenário.
      */
-    public function it_returns_15_percent_when_user_is_member_and_it_is_the_first_purchase()
+    public function it_covers_all_paths_of_the_loyalty_discount_cause_effect_graph(): void
     {
-        // Causa 1 (é membro) = true
-        // Causa 2 (primeira compra) = true
-        $isMember = true;
-        $isFirstPurchase = true;
+        // Cenário 1: Membro E Primeira Compra -> Efeito: 15%
+        $this->assertEquals(0.15, $this->service->calculateLoyaltyDiscountRate(true, true), "Falhou para Membro + Primeira Compra");
 
-        // Efeito esperado = 0.15
-        $this->assertEquals(0.15, $this->service->calculateLoyaltyDiscountRate($isMember, $isFirstPurchase));
+        // Cenário 2: Membro E NÃO Primeira Compra -> Efeito: 10%
+        $this->assertEquals(0.10, $this->service->calculateLoyaltyDiscountRate(true, false), "Falhou para Membro + Compra Recorrente");
+
+        // Cenário 3: NÃO Membro E Primeira Compra -> Efeito: 5%
+        $this->assertEquals(0.05, $this->service->calculateLoyaltyDiscountRate(false, true), "Falhou para Não Membro + Primeira Compra");
+
+        // Cenário 4: NÃO Membro E NÃO Primeira Compra -> Efeito: 0%
+        $this->assertEquals(0.0, $this->service->calculateLoyaltyDiscountRate(false, false), "Falhou para Não Membro + Compra Recorrente");
     }
 
     /**
      * @test
-     * @description Teste para o método calculateBulkDiscountRate.
+     * @description Testa o desconto por volume.
      * @technique Teste de Transição de Estado
-     * Este teste verifica a transição de estado entre a faixa de 5-9 itens e 10+ itens.
-     * A transição ocorre exatamente quando a contagem de itens passa de 9 para 10.
+     * Verifica se o sistema transita corretamente entre os "estados" de desconto
+     * (ex: de 0% para 10%) quando a quantidade de itens atinge um novo patamar.
      */
-    public function it_transitions_discount_rate_correctly_from_9_to_10_items()
+    public function it_transitions_discount_rate_correctly_across_all_states(): void
     {
-        // Estado anterior (9 itens) -> deve retornar 10% de desconto
-        $this->assertEquals(0.10, $this->service->calculateBulkDiscountRate(9));
+        // Estado 1: Sem desconto
+        $this->assertEquals(0.0, $this->service->calculateBulkDiscountRate(4), "Falhou no estado 'sem desconto'");
 
-        // Transição para o novo estado (10 itens) -> deve retornar 15% de desconto
-        $this->assertEquals(0.15, $this->service->calculateBulkDiscountRate(10));
+        // Transição para o Estado 2 (5-9 itens)
+        $this->assertEquals(0.10, $this->service->calculateBulkDiscountRate(5), "Falhou na transição para 5 itens");
+        $this->assertEquals(0.10, $this->service->calculateBulkDiscountRate(9), "Falhou no final do estado de 10%");
+
+        // Transição para o Estado 3 (10+ itens)
+        $this->assertEquals(0.15, $this->service->calculateBulkDiscountRate(10), "Falhou na transição para 10 itens");
     }
 
     /**
      * @test
-     * @description Teste para o método applyFixedCoupon.
+     * @description Testa a aplicação de cupons fixos.
      * @technique Error-Guessing (Adivinhação de Erro)
-     * Este teste é baseado na "adivinhação" de um erro comum do utilizador:
-     * inserir o código do cupom com espaços em branco acidentais no início ou no fim.
+     * Simula erros comuns que um utilizador poderia cometer ao inserir um cupom,
+     * como espaços extras ou letras minúsculas, para testar a robustez do código.
      */
-    public function it_fails_to_apply_coupon_with_leading_or_trailing_whitespace()
+    public function it_handles_common_user_errors_when_applying_coupon(): void
     {
-        $couponWithWhitespace = ' PROMO10 ';
+        // Erro Adivinhado 1: Espaços em branco acidentais.
+        $this->assertEquals(10.0, $this->service->applyFixedCoupon(' PROMO10 '), "Falhou ao tratar espaços em branco");
         
-        // Esperamos que o método, por ser frágil, não reconheça o cupom e retorne 0.
-        $this->assertEquals(0.0, $this->service->applyFixedCoupon($couponWithWhitespace));
+        // Erro Adivinhado 2: Caixa de texto diferente (minúsculas).
+        $this->assertEquals(10.0, $this->service->applyFixedCoupon('promo10'), "Falhou ao tratar letras minúsculas");
+        
+        // Erro Adivinhado 3: Cupom inexistente.
+        $this->assertEquals(0.0, $this->service->applyFixedCoupon('CUPOM_INVALIDO'), "Falhou ao tratar cupom inválido");
+        
+        // Erro Adivinhado 4: Entrada nula.
+        $this->assertEquals(0.0, $this->service->applyFixedCoupon(null), "Falhou ao tratar entrada nula");
     }
 
     /**
      * @test
-     * @description Teste para o método getFinalPrice.
+     * @description Testa o cálculo do preço final com todas as regras de negócio.
      * @technique Teste Funcional Sistêmico
-     * Este teste simula um cenário de ponta a ponta, orquestrando todas as outras
-     * lógicas para verificar se o resultado final está correto.
+     * Simula cenários complexos para validar o fluxo completo do cálculo,
+     * garantindo que todas as lógicas de desconto são orquestradas corretamente.
      */
-    public function it_calculates_the_final_price_for_a_complex_scenario()
+    public function it_calculates_the_final_price_for_multiple_complex_scenarios(): void
     {
-        // Cenário: Um membro fiel (não é a primeira compra) compra 12 itens
-        // com um preço base de R$ 800 e usa um cupom de R$ 50.
+        // --- Cenário 1: Desconto de volume é o maior ---
+        $finalPrice1 = $this->service->getFinalPrice(
+            baseAmount: 800.0,
+            itemCount: 12, // Ativa 15% de desconto por volume
+            isMember: true,
+            isFirstPurchase: false, // Ativa 10% de desconto de lealdade
+            couponCode: 'PROMO50' // Ativa R$50 de desconto fixo
+        );
 
-        $baseAmount = 800.0;
-        $itemCount = 12;
-        $isMember = true;
-        $isFirstPurchase = false;
-        $couponCode = 'PROMO50';
+        // Desconto por volume (15% de 800 = 120) é o maior.
+        // Preço final: 800 - 120 = 680
+        $this->assertEquals(680.0, $finalPrice1, "Falhou no cenário 1 onde o desconto por volume é maior");
 
-        // Lógica esperada:
-        // 1. Desconto de lealdade (membro, não primeira compra): 10%
-        // 2. Desconto de volume (12 itens >= 10): 15%
-        // 3. Desconto percentual total: 10% + 15% = 25%
-        // 4. Preço após descontos percentuais: 800 * (1 - 0.25) = 600
-        // 5. Desconto por faixa (valor 600 >= 500): 10% de 600 = 60
-        // 6. Preço após desconto por faixa: 600 - 60 = 540
-        // 7. Desconto do cupom fixo: 50
-        // 8. Preço final: 540 - 50 = 490
+        // --- Cenário 2: Desconto de lealdade é o maior ---
+        $finalPrice2 = $this->service->getFinalPrice(
+            baseAmount: 200.0,
+            itemCount: 4, // Não ativa desconto por volume
+            isMember: true,
+            isFirstPurchase: true, // Ativa 15% de desconto de lealdade
+            couponCode: 'PROMO10' // Ativa R$10 de desconto fixo
+        );
 
-        $finalPrice = $this->service->getFinalPrice($baseAmount, $itemCount, $isMember, $isFirstPurchase, $couponCode);
-
-        $this->assertEquals(490.0, $finalPrice);
+        // Desconto de lealdade (15% de 200 = 30) é o maior.
+        // Preço final: 200 - 30 = 170
+        $this->assertEquals(170.0, $finalPrice2, "Falhou no cenário 2 onde o desconto de lealdade é maior");
     }
 }
+
